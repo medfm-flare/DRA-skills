@@ -1,6 +1,6 @@
 # Skills for Digital Research Alliance
 
-Shared AI coding setup for the lab. It teaches Claude Code and/or Codex about our Slurm clusters, storage rules,
+This skill teaches Claude Code and/or Codex about our Slurm clusters, storage rules,
 login-node safety, experiment conventions, and reusable HPC workflows.
 
 ## Recommended Setup
@@ -13,7 +13,7 @@ login-node safety, experiment conventions, and reusable HPC workflows.
 ### Clone this repo:
 
 ```bash
-git clone https://github.com/ATATC/DRA-config ~/DRA-config
+git clone https://github.com/medfm-flare/DRA-skills ~/DRA-config
 ```
 
 ### Open Claude Code or Codex and say:
