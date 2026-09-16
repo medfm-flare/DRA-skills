@@ -3,6 +3,8 @@
 This skill teaches Claude Code and/or Codex about our Slurm clusters, storage rules,
 login-node safety, experiment conventions, and reusable HPC workflows.
 
+![DRA Skills overview: use Claude Code or Codex to connect to a cluster, choose resources, launch tracked experiments, troubleshoot jobs, collect results, and reduce resource waste.](assets/skills-overview.png)
+
 ## Recommended Setup
 
 ### Run the tool you want to use at least once
