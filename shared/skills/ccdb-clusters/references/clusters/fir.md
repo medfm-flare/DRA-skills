@@ -13,7 +13,7 @@
 - Partitions and wall-time
 - TRES weights (observed 2026-04, partition `gpubase_bygpu_b1`)
 - Daily cost (12h, requested vs used)
-- Account selection — RRG first, then default
+- Account selection — eligibility and fair share
 - Common pitfalls on Fir
 
 ## At a glance
@@ -46,7 +46,9 @@ partitioned into smaller virtual GPUs.
 | 3g.40gb | 40 GB | `nvidia_h100_80gb_hbm3_3g.40gb:1` | 5 | ~123 GB |
 | Full H100 | 80 GB | `h100:1` (or `h100:4` for whole node) | 12 | ~288 GB |
 
-**Default to 20 GB or 40 GB** — full 80 GB is for genuine VRAM hogs or 1-day jobs.
+Choose the smallest profile that fits measured memory and throughput needs with
+headroom. Duration alone does not determine the required VRAM; verify the relevant
+wall-time limits and scheduling tradeoffs before choosing a full GPU.
 
 ## Storage
 
@@ -155,14 +157,13 @@ Re-verify with `scontrol show partition gpubase_bygpu_b1 | grep -i tresbill`.
 
 (Numbers are billing units, not currency; useful for relative comparison.)
 
-## Account selection — RRG first, then default
+## Account selection — eligibility and fair share
 
-If you have both an RRG (RAC competition award) and a default-allocation
-account on Fir (e.g. `rrg-<pi>_gpu` and `def-<pi>-<sub>_gpu` for the
-same PI), **use the RRG account first**. RRG/RPP allocations are
-merit-awarded for a specific project on an annual use-it-or-lose-it
-cycle; default accounts are auto-granted fallbacks. Reserving the RRG
-account "for later" wastes the awarded cycles.
+Check that the account covers this project and workload. Respect an explicit
+eligible account. When choosing between eligible accounts, inspect current fair
+share and allocation conditions; RRG/RPP awards may be appropriate for their
+designated projects. Follow [billing guidance](../billing.md) rather than choosing
+an account solely from its prefix.
 
 Submit-priority benefit, not just policy: on Fir the SLURM FAIRSHARE
 priority component is dominated by the *FairShare* score (multi-level
@@ -179,15 +180,16 @@ def-* + rrg-* pair on Fir (2026-05-06, account names anonymised):
 `scripts/pick-gpu-account.sh` ranks by FairShare since 2026-05-06; the
 older LevelFS-based behaviour is preserved behind `PICK_BY=levelfs`.
 
-If a 12-h job submitted under the wrong account is still PENDING, you
-can re-route it without losing queue position:
+For a requested account correction to a pending job, verify the job and eligible
+replacement account before using the scheduler update below. A status query does
+not authorize changing the account; acceptance and scheduling effects depend on
+current cluster policy.
 
 ```bash
 scontrol update JobId=<jobid> Account=rrg-<pi>_gpu
 ```
 
-The job's FAIRSHARE priority is recomputed within the next SLURM
-priority cycle (usually a minute).
+Verify the account and scheduler response after an authorized update.
 
 ## Common pitfalls on Fir
 

@@ -1,4 +1,9 @@
-# Routing-Trigger Eval — Baseline Run (2026-05-25)
+# Routing-Trigger Eval — Historical Baseline (2026-05-25)
+
+This records an older model run, not a result for the current skill bundle.
+The version-2 cases change authorization expectations (notably D2/D7) and add
+negative routing and submission-boundary coverage. Rerun in a fresh model session
+before claiming a new routing score.
 
 Eval set: `evals/routing-trigger.json` (20 cases after the 2026-05-27 seff wording update).
 Original baseline run used 18 cases via a fresh `general-purpose` subagent

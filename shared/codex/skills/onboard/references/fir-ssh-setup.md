@@ -42,15 +42,15 @@ helper only selects Duo Push and never approves it.
 
 | | Mode A: user logs in | Mode B: agent-driven login |
 |---|---|---|
-| Who types the passphrase | The user | The user passes it to the agent (exposure risk) — but if the key is in `ssh-agent`, none is needed |
+| Who types the passphrase | The user | The user unlocks the key in their own SSH agent; no passphrase is supplied to the assistant |
 | Who approves Duo | The user (phone) | The user (phone) |
-| Security | High — password never touches the agent | High *iff* the key is in `ssh-agent` (no secret crosses the session); lower if a passphrase must be supplied → rotate after |
+| Security | High — password never touches the agent | No secret crosses the session; a locked key requires Mode A |
 | When to use | Safe fallback when askpass is unavailable or the key is locked | **DRA-config default for the Claude `connect` flow** via `warm-socket.sh` |
 
 The Windows/Codex fallback below is a separate, passphrase-free askpass path: it returns an empty
 response for key passphrases and only selects a recognized Duo Push option.
 
-**Hard rules:** never ask for the passphrase (only use it if the user picks Mode B and offers it);
+**Hard rules:** keep passphrases out of chat and assistant-created scripts;
 the Duo factor is **always** approved by the user on their own device — never try to bypass it; only
 ever do this for the user's own account and own key.
 
@@ -194,38 +194,14 @@ step; afterward the agent reuses the socket (see next section).
 
 ### Mode B — agent-driven login (DRA-config default for the Claude `connect` flow)
 
-Automated by `connect/scripts/warm-socket.sh` — prefer that over hand-rolling the steps. Uses
-OpenSSH 8.4+'s `SSH_ASKPASS_REQUIRE=force` to feed answers from a script; the Duo push is still
-approved on the user's phone. Safe when the key is already in `ssh-agent` (no secret crosses the
-session). Only supply a passphrase to the agent if the user explicitly offers it — then rotate it
-after. The manual steps below show what the script does:
+Use the installed `connect` skill's `scripts/warm-socket.sh` on Unix hosts with
+`timeout` available. Tell the user a Duo push is coming first. The helper selects
+the Duo option but returns an empty response for password/passphrase prompts;
+it cannot unlock an encrypted key. Only the user approves Duo on their device.
 
-```bash
-# 1) temp askpass script (logs only the prompt text, never the response)
-cat > /tmp/fir_askpass.sh <<'EOF'
-#!/bin/bash
-prompt="$1"
-printf '%s\n' "PROMPT: $prompt" >> /tmp/fir_askpass.log
-case "$prompt" in
-  *passphrase*|*Passphrase*) printf '%s\n' '__PASSPHRASE__' ;;  # user's passphrase
-  *) printf '%s\n' '1' ;;                                        # Duo menu -> Push
-esac
-EOF
-chmod 700 /tmp/fir_askpass.sh; : > /tmp/fir_askpass.log
-
-# 2) bring up the master in the background, then tell the user to approve the Duo push
-SSH_ASKPASS=/tmp/fir_askpass.sh SSH_ASKPASS_REQUIRE=force \
-  ssh -o StrictHostKeyChecking=accept-new -N fir.alliancecan.ca &
-
-# 3) confirm (Master running = success)
-sleep 6; ssh -O check fir.alliancecan.ca
-
-# 4) immediately shred the temp files that held the passphrase
-shred -u /tmp/fir_askpass.sh 2>/dev/null || rm -f /tmp/fir_askpass.sh; rm -f /tmp/fir_askpass.log
-```
-
-Then advise the user to **rotate the passphrase** (it passed through the session):
-`ssh-keygen -p -f ~/.ssh/<KEY>`.
+If the key is locked or the helper fails, stop automatic retries and use Mode A.
+Never embed a passphrase in an askpass script. Verify the master socket and a
+remote command before reporting success.
 
 ### Windows / Codex — select Duo Push with the bundled helper
 
@@ -273,8 +249,7 @@ user, but **the user must approve the push; the agent cannot complete Duo itself
 
 ## Security checklist
 
-- [ ] Mode B temp files holding the passphrase `shred`-ed / deleted.
-- [ ] If Mode B used, user advised to rotate the passphrase.
+- [ ] Passphrases remain in the user’s terminal or SSH agent, never in chat or helper files.
 - [ ] `~/.ssh` perms: dir `700`, private key `600`, `config` `600`.
 - [ ] Never write private-key contents into any log, chat, or repository.
 

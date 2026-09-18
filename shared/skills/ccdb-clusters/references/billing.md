@@ -6,7 +6,7 @@
 - Break-even CPU/Mem per GPU (general principle)
 - What's billed: requested × wall-clock, NOT actual usage
 - Fairshare / LevelFS
-- Account selection — MANDATORY pre-submit step
+- Account selection before submission
 - Group-wide efficiency visibility (limits)
 - Useful commands
 
@@ -54,9 +54,9 @@ Pick the CPU count that balances the GPU TRES weight. On Fir's H100 nodes:
 | 3g.40gb | **5** | ~123 GB |
 | Full H100 | **12** | ~288 GB |
 
-**Rule:** request the break-even CPU count with your GPU. Past break-even, CPU
-(not GPU) becomes the billing driver. The same pattern applies on every
-cluster — check the per-cluster reference for that cluster's exact numbers.
+Request CPUs needed by the workload. Past break-even, CPU can become the billing
+driver; this is a cost tradeoff, not a hard cap. Check the per-cluster reference
+for that cluster's exact numbers.
 
 ## What's billed: requested × wall-clock, NOT actual usage
 
@@ -79,87 +79,38 @@ LevelFS = NormShares / EffectvUsage
 
 **Nothing you do in-job increases LevelFS.** Only time (via decay) recovers it.
 
-### Lab-shared LevelFS — `seff` is a team-priority duty
+### Use efficiency measurements for the next run
 
-LevelFS in `def-<pi>_*` and `rrg-<pi>_*` is **shared across the entire lab
-group**, not per-user. When one member runs an idle reservation, an
-under-utilized GPU job, or a TIMEOUT-billed run, the whole lab queues longer
-for ~1 week (the half-life of LevelFS decay). Slurm cannot distinguish
-productive use from idle use — both burn fairshare equally.
+Shared allocations make waste relevant to the lab. Review final `seff` and any
+available GPU trace after a run, then adjust requests where the evidence supports
+it. No single CPU/memory/utilization threshold fits every workload, and low
+utilization alone does not authorize cancellation or a change to the experiment.
 
-This is why `seff <jobID>` after every job is **mandatory**, not optional. It
-is a duty to teammates, not just self-diagnosis. Bars to clear:
+- Memory: use a representative peak with headroom; investigate OOM before merely
+  increasing the request. Confirm whether the measurement covers all job steps.
+- CPU/GPU: compare throughput and bottlenecks before reducing CPUs, increasing
+  workers, or changing profiles. These choices can affect both speed and memory.
+- Time: estimate from measured runtime plus variability; preserve checkpoint/resume
+  behavior for jobs that may hit the limit. Do not change convergence criteria
+  solely to improve an efficiency percentage.
 
-- CPU efficiency ≥ 80% (low CPU usually means dataloader bottleneck)
-- GPU utilization ≥ 90% sustained
-- Memory used vs requested ≥ 80% (over-requesting Mem flips you past the
-  GPU-dominance break-even — see TRES weights above)
+Use [pipeline-iteration.md](pipeline-iteration.md) for unmeasured workloads.
 
-If a job comes back with `CPU Efficiency: 12%` or "GPU idle 3 hours", **fix
-it before submitting more**. Alliance staff will lower your group's priority
-if the pattern continues, and your PI will get the notification.
+## Account selection before submission
 
-### `seff` → next-job sizing (the post-hoc feedback loop)
+Check that the account is eligible for the project and job type. Respect an
+explicit eligible account; do not silently replace it with a different project's
+allocation. If selection is open, inspect current `sshare -U -l --parsable2`.
 
-`seff` is not just a report card — it is the **input to the next sbatch's
-flags**. Every completed job teaches you how to size the next one. Don't
-re-submit the same flags after a low-efficiency run; resize first.
+Typical names include `def-<pi>_gpu`, `rrg-<pi>_gpu`, `def-<pi>_cpu`, and
+`rpp-<pi>`. The bundled `pick-gpu-account.sh` ranks visible `*_gpu` accounts by
+**FairShare** by default, not LevelFS. It does not decide project eligibility or
+cover every account naming scheme; inspect other eligible associations separately.
 
-| `seff` field | What to change in the next sbatch | Why |
-|---|---|---|
-| Memory Utilized: 18 GB / 64 GB requested (28%) | `--mem=24G` (peak × 1.2, round up) | Mem over-request can flip you past GPU-dominance break-even and inflate the bill; always shrinks LevelFS damage. |
-| CPU Efficiency: 35% | drop `--cpus-per-task` to actual saturated cores; if dataloader-bound, **also raise `num_workers`** before resubmitting | Idle CPUs past break-even = pure waste; under-fed GPU = the same waste in disguise. |
-| GPU utilization (from in-job `nvidia-smi`, not `seff`): <70% sustained | drop to a smaller MIG / partial GPU slice on next run | A half-fed full H100 is ~4× the bill of an appropriately-sized 2g.20gb on Fir. |
-| Job Wall-clock: 6 h / 24 h requested | drop `--time=8:00:00` (actual + 30%) | Tighter `--time` improves backfill priority — Slurm prefers jobs it can squeeze into gaps. Billing already uses elapsed, but queue position uses requested. |
-| State: TIMEOUT | first ask "did it converge or just run out?" Then either raise `--time` *and* enable resume-from-checkpoint, OR add patience early-stop so the next run doesn't TIMEOUT again | TIMEOUT bills the **full** requested wall-clock and leaves no checkpoint past the last save — the worst-case billing outcome. |
-| State: OUT_OF_MEMORY | raise `--mem` by 50% AND investigate the leak | Don't just bump mem; OOM often means a dataloader/collate bug that will recur on bigger data. |
-
-**Rule:** if the previous job scored <80% on any `seff` axis, the next
-sbatch must change at least one flag. "Resubmit identical" after a bad
-`seff` is a lab-priority sin — see the LevelFS section above.
-
-The phase-1 measurement table in `pipeline-iteration.md` covers
-*pre-submit* sizing (smoke test → first full run). This `seff` table covers
-*post-submit* sizing (full run → next full run). Use both — they are the
-two halves of the same loop.
-
-## Account selection — MANDATORY pre-submit step
-
-Most users have multiple Alliance accounts. LevelFS drifts daily as the
-group consumes quota, so the "right" account changes. **Always check
-LevelFS before submitting and rewrite `--account=` to the winner.**
-
-Account naming convention:
-
-| Account suffix | Scope | Notes |
-|---|---|---|
-| `def-<pi>_gpu` | Default GPU jobs | Default share, one per group |
-| `def-<pi>_cpu` | Default CPU jobs | CPU-dedicated share |
-| `rrg-<pi>_gpu` | RAC-allocated GPU | Larger share but heavily consumed |
-| `rrg-<pi>_cpu` | RAC-allocated CPU | Same |
-| `rpp-<pi>` | Priority-access (some clusters) | Special, scope varies |
-
-Your specific account names go into your local Claude memory at
-`~/.claude/projects/<proj>/memory/personal_cc_config.md` — **not** here, since
-this skill is shared across users.
-
-### Procedure (before every `sbatch`)
-
-```bash
-# 1. Check current LevelFS via helper script:
-scripts/show-fairshare.sh
-
-# 2. Pick winner for your job type:
-#    - GPU job → max LevelFS among *_gpu accounts
-#    - CPU job → max LevelFS among *_cpu accounts (rarely beaten)
-
-# 3. Submit with that account:
-sbatch --account=$(scripts/pick-gpu-account.sh) \
-       /path/to/job.sh
-```
-
-If both your GPU accounts are <1, you're queued either way — submit on the
-higher one and accept the wait, or delay for ~1 week of decay.
+Resolve helper paths from the loaded skill directory and run them on the cluster.
+Check the helper exit status before constructing an sbatch command. Never submit
+with an empty account after a failed lookup. Personal account names belong in
+local configuration, not this shared reference.
 
 ## Group-wide efficiency visibility (limits)
 

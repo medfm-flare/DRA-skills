@@ -1,158 +1,42 @@
 ---
 name: connect
-description: Decide whether cluster work runs locally or over SSH, and establish/verify the SSH path to an Alliance Canada cluster (Fir). Assumes the one-time key setup was done by /onboard. Use when you need to run Slurm commands but may be on a laptop.
-allowed-tools: Bash(ssh *), Bash(hostname *), Bash(whoami), Bash(grep *), Bash(test *), Bash(ls *), Bash(sinfo *), Bash(${CLAUDE_SKILL_DIR}/scripts/*), Read
+description: "Establish or restore SSH access to Fir from an already configured machine. Use for connection checks or expired sessions; use onboard for first-time key setup."
+allowed-tools: Read Bash(ssh *) Bash(hostname *) Bash(whoami) Bash(sinfo *) Bash(${CLAUDE_SKILL_DIR}/scripts/*)
 ---
 
-# SSH Connect (Alliance Canada)
+# Connect to Fir
 
-Decide whether cluster work should run locally on this host or remotely over SSH, and make sure
-the SSH path is live. The **one-time** key setup (generate key, upload the public key to CCDB,
-write `~/.ssh/config`) is done by the `onboard` skill — this skill only **reuses** it and never
-re-uploads anything.
+Establish a verified shell and Slurm path using the existing SSH configuration.
+Do not generate or upload keys here; use `onboard` for missing setup or newly
+registered keys. Never collect passwords, key passphrases, or Duo codes.
 
-## Step 1: Detect the current environment
+## Choose the execution path
 
-```bash
-hostname -f
-whoami
-```
+Check `hostname -f` and the intended target. On the target cluster, verify `whoami`
+and `sinfo --version` locally. Being on a different Alliance cluster does not
+mean Fir commands should run there.
 
-- If the hostname ends in `.alliancecan.ca` (e.g. `fir.alliancecan.ca` — a login node), you are
-  **on the cluster**. Run Slurm commands **locally** here; do a quick check and stop:
-  ```bash
-  hostname -f && whoami && sinfo --version 2>&1
-  ```
-- Otherwise treat this as a **local machine / laptop**: Fir work runs **remotely** (Step 2).
+From a laptop, inspect the effective SSH configuration for `fir.alliancecan.ca`
+(`ssh -G` accounts for aliases and Include files). If the username or key is
+missing or rejected, use the relevant onboarding setup guidance.
 
-## Step 2: Establish / verify the remote path (local machine -> Fir)
+## Reuse or restore the connection
 
-Access is key-based through the `fir.alliancecan.ca` host in `~/.ssh/config`. Confirm it exists:
+- **Unix with a live master:** `ssh -O check fir.alliancecan.ca`, then verify
+  `ssh fir.alliancecan.ca 'hostname -f; whoami; sinfo --version'`.
+- **Unix with an expired master:** tell the user a Duo push is coming, then run
+  [scripts/warm-socket.sh](scripts/warm-socket.sh) with `fir.alliancecan.ca` using
+  its resolved absolute path. It requires `timeout` and an available SSH key.
+  If the helper fails, stop automatic retries and have the user run
+  `ssh fir.alliancecan.ca` in their own terminal, then verify again.
+- **Windows or incompatible multiplexing:** read [references/windows.md](references/windows.md)
+  for the bundled askpass path and stale-socket bypass flags. Batch related
+  commands into one connection to avoid repeated Duo pushes.
 
-```bash
-grep -qE "^Host[[:space:]]+fir.alliancecan.ca" ~/.ssh/config && echo "host OK" || echo "host MISSING"
-```
+The helper selects a Duo option; only the user approves authentication. A locked
+key must be unlocked by the user in their terminal or SSH agent. A Duo prompt
+means the key was accepted, not that onboarding must be repeated.
 
-**If MISSING** → the one-time setup hasn't been done. Stop and tell the user to run `/onboard`
-(generates/uploads the key, writes the host entry). Don't generate keys or collect passwords/Duo here.
-
-**If host OK**, prefer a persistent ControlMaster socket where supported. Fir requires **Duo 2FA
-on every fresh login**, so a warm socket is the most stable path on Unix-like hosts:
-
-```bash
-ssh -O check fir.alliancecan.ca 2>&1   # "Master running (pid=...)" = socket live
-```
-
-- **Socket live** → reuse it directly (no prompt):
-  ```bash
-  ssh fir.alliancecan.ca "hostname -f && whoami && sinfo --version 2>&1"
-  ```
-- **No master / socket expired** on a Unix-like host (ControlPersist elapsed, or first connect this
-  session) → the agent has no tty for the passphrase/Duo, so default to **Mode B** (agent-driven):
-  bring the socket up yourself and have the user approve the Duo push on their phone. Tell the user
-  a push is coming, then run:
-  ```bash
-  ${CLAUDE_SKILL_DIR}/scripts/warm-socket.sh fir.alliancecan.ca
-  ```
-  The script is **fail-loud**: it only succeeds once the master socket truly exists. If it exits
-  non-zero (the key needs a passphrase not in `ssh-agent`, or Duo timed out), fall back to
-  **Mode A** — have the user run it themselves; in Claude Code:
-  ```
-  ! ssh fir.alliancecan.ca "hostname -f && whoami"
-  ```
-  Either way the 8h socket then lets the agent reuse the connection. This is **not** an onboarding
-  failure — only send the user to `/onboard` if the host entry is MISSING or the key itself is
-  rejected (`Permission denied (publickey)` **before** any Duo prompt). For key/format problems
-  see the onboard skill's `references/fir-ssh-setup.md`.
-
-On macOS or Linux, continue using the ControlMaster flow above and skip the Windows-specific
-fallback below.
-
-### Windows / Codex fallback: select Duo Push with SSH_ASKPASS
-
-On Windows, `ssh -O check` may report `No ControlPath specified`, `Not a socket`, or another
-ControlMaster failure. Use the bundled askpass helper to select **Duo Push** automatically. The
-helper never approves the second factor: tell the user that a push is coming, and they must approve
-it on their own device. Never ask for a Duo passcode in chat.
-
-Resolve the helper from the user's Codex home so the command is portable across Windows accounts.
-`SSH_ASKPASS` is an executable-path value, so keep the environment value unquoted. PowerShell
-preserves spaces in the assigned string; embedded quote characters would become part of the path:
-
-```powershell
-$codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
-$askpassPath = Join-Path $codexHome 'skills\connect\scripts\fir-duo-push-askpass.cmd'
-if (-not (Test-Path -LiteralPath $askpassPath -PathType Leaf)) {
-    throw "SSH askpass helper not found: $askpassPath"
-}
-$env:SSH_ASKPASS = $askpassPath
-$env:SSH_ASKPASS_REQUIRE = 'force'
-$env:DISPLAY = 'codex'
-ssh -o ControlMaster=no -o ControlPath=none fir.alliancecan.ca "hostname -f && whoami && sinfo --version 2>&1"
-```
-
-`ControlMaster=no` and `ControlPath=none` deliberately bypass stale or incompatible socket settings.
-The helper returns an empty response to password and key-passphrase prompts, so an encrypted key
-must already be unlocked in `ssh-agent`; otherwise use Mode A in a separate terminal.
-
-Without working multiplexing, every independent SSH connection can trigger another Duo push. Batch
-related commands into one connection:
-
-```powershell
-$codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
-$askpassPath = Join-Path $codexHome 'skills\connect\scripts\fir-duo-push-askpass.cmd'
-if (-not (Test-Path -LiteralPath $askpassPath -PathType Leaf)) {
-    throw "SSH askpass helper not found: $askpassPath"
-}
-$env:SSH_ASKPASS = $askpassPath
-$env:SSH_ASKPASS_REQUIRE = 'force'
-$env:DISPLAY = 'codex'
-@'
-hostname -f
-whoami
-squeue -u $(whoami)
-'@ | ssh -o ControlMaster=no -o ControlPath=none fir.alliancecan.ca bash -s
-```
-
-Avoid parallel `ssh` or `scp` calls from Windows when multiplexing is unavailable or unreliable.
-Each connection may send a separate push and can time out while waiting for approval.
-
-Once the connection path is established, run all Fir Slurm control, file inspection, and
-submissions remotely. Reuse a live socket where supported; on Windows use the askpass and bypass
-flags above:
-
-```bash
-ssh fir.alliancecan.ca "<command>"
-```
-
-## Wrap up
-
-Summarize in one of these forms:
-
-### On the cluster
-```text
-## Fir: Operate Locally
-- [x] Current host is the Fir login node
-- [x] Slurm commands run locally here
-```
-
-### Remote path established
-```text
-## Local Machine -> Fir: Connected
-- [x] Key-based SSH via ~/.ssh/config
-- [x] Remote shell + Slurm: OK
-- [x] Fir commands wrapped in ssh
-```
-
-### Socket cold (already onboarded, just needs re-login)
-```text
-## Local Machine -> Fir: Re-warm needed
-- [ ] ControlMaster socket expired — ran warm-socket.sh (Mode B); user approved the Duo push
-- [x] Key + ~/.ssh/config already set up (no /onboard needed)
-```
-
-### Not set up yet
-```text
-## Local Machine -> Fir: Needs onboarding
-- [ ] No ~/.ssh/config host entry, or key rejected — run /onboard first (one-time key upload to CCDB)
-```
+Finish by reporting the verified host/user and whether subsequent commands run
+locally or over SSH. If blocked, identify the failed stage and the single user
+action needed. Do not claim a connection succeeded without remote output.

@@ -1,172 +1,63 @@
 ---
 name: onboard
-description: One-time setup to get a lab member onto Alliance Canada (DRAC) with this shared Claude Code config. Sets up key-based SSH with ControlMaster reuse (one interactive Duo login, then passwordless), detects the Slurm allocation account, writes saved values, and runs setup.sh. Use when first configuring a machine.
-allowed-tools: Bash(git *), Bash(hostname *), Bash(whoami), Bash(which *), Bash(cat *), Bash(ls *), Bash(mkdir *), Bash(chmod *), Bash(ssh-keygen *), Bash(ssh *), Bash(sinfo *), Bash(sshare *), Bash(sacctmgr *), Bash(*/setup.sh *), Bash(${CLAUDE_SKILL_DIR}/scripts/*), Read, Edit, Write
+description: "Install DRA configuration and set up first-time Alliance Canada SSH access for Claude Code or Codex. Use for a new machine or a newly registered key."
+allowed-tools: Read Edit Write Bash(git clone *) Bash(hostname *) Bash(whoami) Bash(ssh *) Bash(ssh-keygen *) Bash(sshare *) Bash(sacctmgr *) Bash(mkdir *) Bash(chmod *) Bash(*/setup.sh *)
 ---
 
-# Alliance Canada Setup — Onboarding (one-time)
+# Set Up DRA Skills
 
-You are helping a lab member do the **one-time** setup that connects this Claude Code
-config to an Alliance Canada (DRAC / CCDB) cluster — Fir by default. Walk them through it
-interactively; be concise. Greet with **"Welcome onboard, Foreseer!"** then explain: this
-sets up key-based SSH with ControlMaster reuse (one interactive Duo login, then passwordless),
-records the user's Slurm allocation account, and installs the lab config so Claude understands
-the cluster.
+Install this bundle for the user's chosen assistant and establish Alliance SSH
+access when needed. SSH identity and the Slurm allocation account are separate.
+An installation request authorizes the described configuration work; ask only
+for unresolved identity, target, or account choices.
 
-Two things are distinct and both needed: **(A) SSH login access** (username + a registered
-SSH key) and **(B) a Slurm allocation account** (the `--account=` value, e.g. `def-<pi>_gpu`).
+## Discover existing setup
 
-## Pre-flight
+Use the current checkout when it contains `setup.sh`; otherwise locate the user's
+DRA checkout. If cloning is needed, use
+`https://github.com/medfm-flare/DRA-skills` (the usual destination is `~/DRA-config`).
+Respect an explicit Claude/Codex choice. If unspecified, detect `~/.claude` and
+`~/.codex` and configure the initialized tools. A missing tool directory requires
+the user to run that tool once. Claude additionally needs `python3` and `jq`.
 
-1. `ls -ld ~/.claude 2>/dev/null` — if missing, ask the user to run `claude` once first.
-2. Confirm the repo is cloned: `ls -d ~/DRA-config 2>/dev/null`. If not:
-   ```bash
-   git clone https://github.com/ATATC/DRA-config.git ~/DRA-config
-   ```
-3. `which jq` — needed for Claude's statusline.
+Check the actual hostname and target. Already on the target cluster: use local
+Slurm queries. On a laptop: reuse working SSH via `connect`. Read
+[references/fir-ssh-setup.md](references/fir-ssh-setup.md) only for first-time
+key registration, SSH configuration, key-format issues, or failed authentication.
 
-## Step A — SSH access (one-time; skip if already on a cluster login node)
+Preserve existing keys and unrelated SSH configuration. Register only the public
+key; the user handles CCDB login, private-key passphrases, and Duo approval.
+Newly registered keys can take time to propagate; do not keep retrying login or
+replace a key merely because it has not propagated yet.
 
-If `hostname -f` already ends in `.alliancecan.ca`, you are on the cluster — skip to Step B.
-Otherwise set up key-based access from this local machine. **Done once per machine** — `connect`
-reuses it afterward and never re-uploads.
+## Configure and verify
 
-**Read first — the agent cannot log in for the user.** Fir requires **Duo 2FA on every fresh
-login, even with a registered key** (the key is only factor 1). The agent has no tty / no
-ssh-askpass, so the **user** runs the interactive login; the agent only writes files and reuses
-the connection afterward. Full detail (existing/encrypted keys, key-format conversion, Windows,
-agent-driven Mode B, troubleshooting) is in `references/fir-ssh-setup.md` — read it if anything
-below fails.
+After shell access is verified, query the cluster username and `sshare -U -l
+--parsable2`. Select an eligible allocation for the user's project; use the
+`ccdb-clusters` account helper when a choice is needed. Do not infer Alliance
+identity from the laptop username or require a ControlMaster socket on Windows.
 
-1. **Find or create a key.** Check for an existing one first (the user may already have a key in
-   any format — see the reference):
-   ```bash
-   ls ~/.ssh/*.pub 2>/dev/null
-   ```
-   If none, create one:
-   ```bash
-   ssh-keygen -t ed25519 -C "<user-email-or-label>" -f ~/.ssh/id_ed25519
-   ```
-2. **Register the PUBLIC key with CCDB** (one-time MFA on the website):
-   ```bash
-   cat ~/.ssh/id_ed25519.pub   # or the user's existing <key>.pub
-   ```
-   Have the user paste that line at <https://ccdb.alliancecan.ca/ssh_authorized_keys>
-   (CCDB → Manage SSH Keys). **Propagation takes ~10–30 min** — failing right after upload is
-   normal. Never handle the user's password or Duo passcode in chat.
-3. **Add a `~/.ssh/config` host entry** (ask for the Alliance username if it differs from local
-   `whoami`; use the user's key path if not `id_ed25519`):
-   ```text
-   Host fir.alliancecan.ca
-       User <ccdb_username>
-       IdentityFile ~/.ssh/id_ed25519
-       IdentitiesOnly yes
-       AddKeysToAgent yes
-       ServerAliveInterval 60
-       ControlMaster auto
-       ControlPath ~/.ssh/cm-%r@%h:%p
-       ControlPersist 8h
-   ```
-   ControlMaster is **essential, not optional**: it is the only path to passwordless reuse, because
-   Duo is required on every fresh login. (Windows has no multiplexing — see the reference.)
-   ```bash
-   chmod 600 ~/.ssh/config
-   ```
-4. **First connection — default Mode B.** Run `/connect`: the agent brings up the ControlMaster
-   socket itself and you just approve the Duo push on your phone (the 8h socket then makes reuse
-   passwordless). If the key has a passphrase not in `ssh-agent`, `/connect` is fail-loud and falls
-   back to **Mode A** — you run the login yourself; in Claude Code:
-   ```
-   ! ssh fir.alliancecan.ca "hostname -f && whoami"
-   ```
-   (enter the passphrase, pick `1` at the Duo menu, approve the push).
-5. **Verify (agent).** Once the user reports success, reuse the socket:
-   ```bash
-   ssh -O check fir.alliancecan.ca          # "Master running" = socket live
-   ssh fir.alliancecan.ca "hostname -f && whoami"
-   ```
-   - `Permission denied (publickey)` **before** any Duo prompt = real key problem (not propagated,
-     or local/CCDB keys not a pair) → see the reference's troubleshooting.
-   - Reaching the Duo prompt = the key works; that's normal 2FA — have the user complete it in their
-     Mode A login above, not a failure to debug.
+Show the resolved target, username, account, and assistant targets. Preserve other
+saved values while updating `<repo>/build/.env.local`:
 
-## Step B — Detect the Slurm allocation account
-
-**Prerequisite:** Step A's verify must have succeeded (`hostname`+`whoami` returned / socket live).
-If it didn't — `Permission denied (publickey)` (key still propagating, ~10–30 min) or the Duo
-login isn't done — **finish Step A first**; do not run the queries below against a connection that
-isn't up (you'll get a confusing error instead of the clear Step A diagnosis).
-
-Run on the cluster (directly if on a login node, else over the SSH from Step A). Don't make the
-user look things up — run it yourself:
-
-```bash
-ssh fir.alliancecan.ca "whoami; sshare -U -l --parsable2 | head"
+```text
+FIR_USERNAME=<cluster username>
+FIR_ACCOUNT=<eligible GPU account>
+FIR_GPU_TYPE=<chosen GPU type>
 ```
 
-Pick the best GPU account with the bundled helper (ranks by FairShare, prefers RRG/RPP):
+Run from that checkout:
 
 ```bash
-ssh fir.alliancecan.ca "bash -s" < ${CLAUDE_SKILL_DIR}/../ccdb-clusters/scripts/pick-gpu-account.sh
+./setup.sh --modules fir --targets <claude|codex|claude,codex> --non-interactive
 ```
 
-(or run `pick-gpu-account.sh` directly when on the cluster). Alliance accounts look like
-`def-<pi>_gpu`, `rrg-<pi>_gpu` (RAC-allocated), `rpp-<pi>`. Use `def-<pi>_cpu` for CPU jobs.
+Verify the selected tool's managed instruction block and installed skill links,
+including the generated `slurm-status` skill. Preserve content outside the lab
+markers. Report what was installed and any remaining authentication prerequisite.
+Installation is complete when the links and configuration are valid; a full
+routing evaluation or a real Slurm job is not required for ordinary onboarding.
 
-## Step C — Confirm and save
-
-Show a short, plain-language summary: username, cluster (Fir), and the GPU account you'll
-record. After the user confirms, write `~/DRA-config/build/.env.local` with the Fir values:
-
-```bash
-# Lab Claude Config - saved template variables
-FIR_USERNAME=<ccdb_username>
-FIR_ACCOUNT=<def-or-rrg account>
-FIR_GPU_TYPE=h100
-```
-
-## Step D — Run setup
-
-```bash
-cd ~/DRA-config && ./setup.sh --modules fir --non-interactive
-```
-
-(Add `--targets claude,codex` if configuring Codex too.)
-
-## Step E — Smoke test (verify the install routes correctly)
-
-Run the routing-trigger eval as a final check that the bundle installed cleanly and the skill
-descriptions route as expected. Catches broken symlinks, missing skills, or a description
-regression **before** it bites a real workflow.
-
-1. **Locate the eval:** `~/DRA-config/evals/routing-trigger.json` (18 cases: positive,
-   disambiguation/boundary, negative).
-2. **Dispatch a fresh `general-purpose` subagent** with (a) the 9 installed skill descriptions
-   (`head ~/.claude/skills/*/SKILL.md` or equivalent) and (b) the 18 queries. Instruct it to
-   route each case and return strict JSON (`id`, `picked_skill`, `confidence`, `why`,
-   `runner_up`). No tool execution — paper routing only.
-3. **Score** each `picked_skill` against `expect`. Baseline (in
-   `~/DRA-config/evals/routing-trigger-baseline.md`) was **18/18 routed, 17 clean** with one
-   boundary case (D5) noted there.
-4. **Report:**
-   - All clear → install verified, hand off to the user.
-   - Failures → name each failed case + the skill whose description likely needs tightening;
-     suggest re-running after the fix.
-
-Skippable if the user wants to start immediately — they can rerun the eval anytime against the
-installed bundle.
-
-## Post-setup
-
-1. Read and briefly summarize `~/.claude/CLAUDE.md` so the user sees what was installed.
-2. Ask if they want personal notes appended **below** the `<!-- END: lab-config -->` marker
-   (e.g. project paths, framework preferences). Their content outside the markers is never
-   touched by `setup.sh`.
-3. Mention: `/slurm-status` checks cluster availability; `/connect` re-establishes the SSH
-   path in later sessions (no re-upload needed); update with
-   `cd ~/DRA-config && git pull && ./setup.sh --modules fir`.
-
-## If setup fails
-
-Read the error and help debug. Common issues: missing `jq`, key not yet propagated, wrong
-account name, `~/.claude` missing. `setup.sh` is idempotent — safe to re-run.
+For changes to skill descriptions, use the repository's `evals/routing-trigger.json`
+as a separate routing check. For later SSH expiry use `connect`; for updates rerun
+the installer with the same selected targets after updating the checkout.

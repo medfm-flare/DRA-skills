@@ -58,12 +58,12 @@ docs/
 | Field | Meaning |
 |---|---|
 | `run_code` | unique, filesystem-safe id (also the folder name) |
-| `status` | `submitted｜running｜completed｜failed｜timeout｜cancelled｜oom` |
+| `status` | `prepared｜submission_unknown｜submission_failed｜submitted｜running｜completed｜failed｜timeout｜cancelled｜oom` |
 | `tags` | list of keywords |
 | `cluster`, `account` | where it ran / under which allocation |
 | `git: {commit, dirty, diff_path}` | provenance; `diff_path` → saved diff file when `dirty: true` |
 | `slurm_job_ids` | list (smoke + train + eval ids) |
-| `started_at`, `finished_at` | ISO-8601 |
+| `started_at`, `finished_at` | ISO-8601 submission and finish timestamps; null when not yet known |
 | `objective: {goal, expected_result: {metric, value, rationale}}` | what success looks like, pre-registered |
 | `decision_rule` | what each outcome (above/at/below expected) will mean |
 | `best_metric: {name, value, epoch}` | the headline result |
@@ -103,7 +103,7 @@ account: rrg-<pi>_gpu
 git:
   commit: 3bd7d07a779715ac8d53560a4e612078dbddb62e
   dirty: true
-  diff_path: git.diff            # saved working-tree diff (dirty run still reproducible)
+  diff_path: git.diff            # tracked changes relative to HEAD; snapshot required untracked inputs separately
 slurm_job_ids: ['41061405']
 started_at: '2026-05-22T20:59:33Z'
 finished_at: '2026-05-22T21:48:42Z'
@@ -149,3 +149,30 @@ objective.expected_intermediate_signals:
 - Record real provenance: when the tree is dirty, set `dirty: true` and save the diff to
   `git.diff` (`git.diff_path`). Never claim a clean commit you cannot reproduce.
 - Never fabricate a metric or a terminal status — only write one you actually resolved.
+
+## Submission lifecycle and provenance
+
+- `prepared`: reviewable inputs exist; no job has been accepted. Job IDs are empty
+  and `started_at` is null.
+- `submitted`: the scheduler returned a job ID and it has been saved. `started_at`
+  records submission time in this schema, not the scheduler's later Start time.
+- `submission_failed`: a definite rejection before a job was accepted; preserve
+  the error separately from workload failures.
+- `submission_unknown`: a connection or receipt failure leaves acceptance
+  uncertain. Reconcile the scheduler before any retry; do not create duplicates.
+- `harvest` normally resolves `submitted`/`running` runs. For staged workflows,
+  record which jobs are required and which attempt is active; never infer overall
+  completion from the largest numerical job ID alone.
+
+Capture Git provenance from the code that will execute, including the remote
+checkout when used. `git diff --binary HEAD` captures staged and unstaged tracked
+changes together. List relevant untracked inputs with `git ls-files --others
+--exclude-standard` and snapshot the ones used by the run, excluding secrets and
+large artifacts. Record limitations when required inputs cannot be captured.
+Do not claim reproducibility merely because a diff file exists. If the project
+has no Git repository, use null commit/diff fields and describe the input snapshot.
+
+Expected metrics, decision rules, and hashes must be evidence-backed; use null
+for unknown values. The example above illustrates fields, not mandatory scientific
+claims or thresholds. Preserve actual finish timestamps; an observation time is
+not a substitute for an unknown scheduler finish time.

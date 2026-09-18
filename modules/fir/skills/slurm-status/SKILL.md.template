@@ -1,92 +1,50 @@
 ---
 name: slurm-status
-description: Show current GPU and resource usage on Fir, who is using H100 GPUs, and what the user can request right now. Use when checking Fir availability before submitting a job, or when the user asks what GPUs are free.
-allowed-tools: Bash(sinfo *), Bash(squeue *), Bash(sacctmgr *), Bash(seff *)
+description: "Check live GPU availability and queue pressure on Fir. Use to see which resources are free now or to size a request against current load."
+allowed-tools: Read Bash(ssh *) Bash(sinfo *) Bash(scontrol *) Bash(squeue *) Bash(seff *) Bash(hostname *)
 ---
 
-# Fir Slurm Resource Status Report
+# Live Fir Resource Status
 
-Run the commands below and synthesize a clear, concise status report.
+Report current availability or queue pressure at the scope requested. Query Fir
+through the established connection; use `connect` if needed. Do not run these
+commands on a laptop or a different cluster.
 
-## User context
+Saved user: `{{FIR_USERNAME}}`; account: `{{FIR_ACCOUNT}}`; preferred GPU type:
+`{{FIR_GPU_TYPE}}`. These are context, not proof of current eligibility or availability.
 
-- Username: `{{FIR_USERNAME}}`
-- GPU account: `{{FIR_ACCOUNT}}`
-- Default GPU type: `{{FIR_GPU_TYPE}}`
-- Fir GPU profiles to watch for: full `h100`, `nvidia_h100_80gb_hbm3_3g.40gb`,
-  `nvidia_h100_80gb_hbm3_2g.20gb`, `nvidia_h100_80gb_hbm3_1g.10gb`.
-- Fir's GPU partitions are **banded** (`gpubase_bygpu_b1..b5` per-GPU,
-  `gpubase_bynode_b1..b5` whole-node, plus `gpubase_interac`). You do **not** pick a
-  partition — SLURM auto-selects by `--time`. The same physical GPU nodes appear in
-  every band, so a single band is representative for node-availability queries.
-- Account allocations influence queue priority, not a fixed GPU cap.
-- For GPU selection always use `--gpus-per-node=<gpu_type>:<count>` — never
-  `--partition`, `--gres`, or `--constraint`.
+## Node availability
 
-## Steps
+```bash
+sinfo -p gpubase_bygpu_b1 -N -o '%N %G %C %e %t'
+```
 
-Define the GPU partition set once:
+Fir repeats physical nodes across its time bands; use one representative band to
+avoid double counting. `%G` lists configured GPU resources, not free GPUs. Inspect
+allocation details (`scontrol show node <node>`, including GresUsed/AllocTRES) when
+needed to estimate free full H100s or MIG slices. Distinguish measured allocation
+from an estimate, and do not treat a mixed node as entirely free. Drained or reserved
+capacity may not be schedulable even when hardware appears idle.
+
+## Queue context, when relevant
+
+For a whole-GPU queue view, include all GPU bands; the node-view shortcut does not
+cover every queued job:
 
 ```bash
 GPUPARTS=gpubase_bygpu_b1,gpubase_bygpu_b2,gpubase_bygpu_b3,gpubase_bygpu_b4,gpubase_bygpu_b5,gpubase_bynode_b1,gpubase_bynode_b2,gpubase_bynode_b3,gpubase_bynode_b4,gpubase_bynode_b5,gpubase_interac
+squeue -p "$GPUPARTS" -t R,PD -o '%i %u %a %T %M %b %R'
 ```
 
-### 1. GPU node / MIG overview
+Summarize by profile, pending reason, or user/account only as needed to answer
+the question. Use `slurm-queue` for the user's job overview and `slurm-resource`
+for account eligibility. Query `seff <jobid>` only when completed-job efficiency
+is relevant; a free-GPU question does not require an efficiency audit.
 
-```bash
-sinfo -p gpubase_bygpu_b1 -N -o "%N %G %C %e %t" 2>&1
-```
+For sizing advice, use `ccdb-clusters` and the workload's measurements. Fir GPU
+requests use `--gpus-per-node=<gpu_type>:<count>`, never `--partition`, `--gres`,
+or `--constraint`. A status check does not authorize a smoke test or submission.
 
-The GPU nodes are shared across all bands, so band `b1` is representative.
-Summarize: GPU/MIG gres per node, CPUs (alloc/idle/other/total), free memory, state.
-
-### 2. Who is using GPUs right now
-
-```bash
-squeue -p "$GPUPARTS" -t R -o "%.10i %.12u %.16a %.2t %.12M %.4C %8m %b %R" 2>&1
-```
-
-Summarize by user/account how many GPUs are in use. Highlight `{{FIR_ACCOUNT}}` if present.
-
-### 3. Pending GPU jobs
-
-```bash
-squeue -p "$GPUPARTS" -t PD -o "%.10i %.12u %.16a %.20r %b" 2>&1 | head -30
-```
-
-Summarize how many are pending, by whom, and the reason codes.
-
-### 4. Your current jobs
-
-```bash
-squeue -u {{FIR_USERNAME}} -o "%.10i %.12P %.20j %.2t %.12M %.4C %8m %b %R" 2>&1
-```
-
-### 5. Your account associations
-
-```bash
-sacctmgr show association user={{FIR_USERNAME}} format=account%24,qos%20 --noheader 2>&1 | head -20
-```
-
-### 6. Efficiency check for a recent completed job
-
-If the user names a completed job ID (or one is known from context):
-
-```bash
-seff <jobid> 2>&1
-```
-
-Summarize CPU/memory efficiency, elapsed time, and whether it looks overprovisioned.
-
-### 7. What can you request right now?
-
-From the above, report:
-
-- **Available full H100s and MIG slices** (from step 1), by profile (`3g.40gb` / `2g.20gb` / `1g.10gb`).
-- **Who is using the GPUs** and whether the queue looks busy (steps 2–3).
-- **A smoke-test recommendation first** on the smallest feasible profile.
-- **A concrete request size** for the real job: `--gpus-per-node`, `--cpus-per-task`, `--mem`, `--time`.
-- **A tuning note from `seff`** when a completed job is available.
-- Any blockers: drained nodes, a deep pending queue, or an account mismatch.
-
-Present the final report as a clean markdown summary with sections.
+Report the observation time, available evidence, important blockers, and a request
+recommendation only when workload needs are known. Do not promise a queue start
+time or hide failed queries behind an empty report.

@@ -1,89 +1,41 @@
 ---
 name: slurm-job
-description: Create or modify an sbatch job script with correct Alliance Canada (Fir) directives — account, GPU profile, resource requests, and best-practice defaults. Use when writing or editing a .sh/.slurm job script. Does NOT submit — use /submit-experiment to actually launch a tracked run.
-allowed-tools: Bash(sinfo *), Bash(sshare *), Bash(sacctmgr *), Bash(whoami), Bash(hostname *), Bash(cat *), Bash(ls *), Read, Edit, Write, Glob, Grep
+description: "Create or edit Alliance Canada sbatch scripts. Use for job directives, resource sizing, or launch commands; use submit-experiment to submit a run."
+allowed-tools: Read Edit Write Glob Grep Bash(bash -n *) Bash(ssh *) Bash(sshare *) Bash(sacctmgr *) Bash(sinfo *) Bash(hostname *)
 ---
 
-# Create / Modify an Sbatch Job Script (Alliance Canada)
+# Prepare an Alliance Sbatch Script
 
-Help the user produce a correct, ready-to-submit sbatch script for an Alliance Canada cluster
-(Fir by default). For GPU sizing / break-even, MAX_TRES billing, and storage tables, consult the
-`ccdb-clusters` skill's `references/` — do not re-derive them here.
+Produce a script at the requested path (default `job.sh`) for the user's target
+cluster and workload. Use the supplied command, config, and existing script to
+resolve requirements; ask only for choices that cannot be inferred safely.
+This skill prepares scripts. Use `submit-experiment` for an authorized submission.
 
-## Modifying an existing script
+Load `ccdb-clusters` for the target cluster's directives and resource sizing.
+Use its template reference for a new script or complex launch, billing guidance
+when choosing an account, and storage guidance when staging data. Do not load
+unrelated references for a small script edit.
 
-If the user points to an existing `.sh` / `.slurm` file, read it and adjust GPU profile, account,
-resource requests, directives, or logging using the same rules below.
+## Required properties
 
-## Creating a new script
+- An eligible account, explicit time limit, and workload-appropriate CPU, memory,
+  and GPU requests. Respect an explicit eligible account; otherwise query current
+  associations/fair share on the cluster. Mark unresolved values as placeholders.
+- On Fir, request GPUs only with `--gpus-per-node=<gpu_type>:<count>`, never
+  `--partition`, `--gres`, or `--constraint`. Omit GPU directives for CPU-only jobs.
+- Persistent stdout/stderr paths such as `logs/%x_%j.out` and `.err`. Ensure their
+  parent directory exists **before sbatch**; creating it inside the job is too late.
+- Module/venv setup, correct working directory, and the user's actual launch command.
+  Preserve an existing script's error handling; use appropriate failure propagation
+  in a new script.
+- Large outputs go to `$SCRATCH` or `$PROJECT`. Copy required node-local results
+  back before exit. Do not treat scratch as a permanent archive.
 
-### 1. Gather requirements (combine into one question)
+Use measurements from a prior run or an authorized smoke test to size new work.
+Preparing a script alone does not authorize launching a sizing job. For unmeasured
+workloads, explain provisional resource choices and the smoke test needed before scaling.
 
-- What does the job do (train / infer / preprocess)?
-- GPU need → pick the **smallest Fir profile that fits**: `nvidia_h100_80gb_hbm3_1g.10gb` (10 GB),
-  `…_2g.20gb` (20 GB), `…_3g.40gb` (40 GB), or full `h100` (80 GB). Default to a MIG slice unless
-  the model needs >40 GB VRAM or the job is ≥1 day.
-- GPU count, wall time, job name, and where to save the script.
-
-### 2. Pick the account
-
-```bash
-whoami
-sshare -U -l --parsable2 | head
-```
-
-Use the `ccdb-clusters` skill's `pick-gpu-account.sh` to choose the highest-FairShare GPU account
-(it prefers RRG/RPP). Accounts look like `def-<pi>_gpu` / `rrg-<pi>_gpu`; use `def-<pi>_cpu` for
-CPU-only jobs.
-
-### 3. Generate the script (Fir directive style)
-
-```bash
-#!/bin/bash
-#SBATCH --job-name=<job_name>
-#SBATCH --account=<account>
-#SBATCH --gpus-per-node=<gpu_type>:<count>
-#SBATCH --cpus-per-task=<cpus>
-#SBATCH --mem=<memory>
-#SBATCH --time=<time>
-#SBATCH --output=logs/%x_%j.out
-#SBATCH --error=logs/%x_%j.err
-
-set -euo pipefail
-mkdir -p logs
-echo "Job $SLURM_JOB_ID on $(hostname) — $(date)"
-
-# module load python/3.11.5 cuda/12.6   # uncomment as needed
-# source <venv>/bin/activate
-
-<user_command>
-```
-
-**Fir GPU rule**: choose the GPU only with `--gpus-per-node=<gpu_type>:<count>`. Never use
-`--partition`, `--gres`, or `--constraint`. Match CPUs to the GPU break-even (1 / 3 / 5 / 12 for
-1g / 2g / 3g / full H100 — see `ccdb-clusters/references/clusters/fir.md`); over-requesting CPUs
-flips billing to the CPU rate.
-
-### Best practices
-
-1. **Logs** → `logs/%x_%j.out|err` (`%x` = job name, `%j` = job id).
-2. `set -euo pipefail` at the top.
-3. Print job id / host / date so logs are debuggable.
-4. Always set `--time`; smoke-test on the smallest profile before the full run.
-5. **Storage**: write large outputs to `$SCRATCH` or `$PROJECT`, never `$HOME`. For many-small-file
-   I/O, stage to node-local `$SLURM_TMPDIR` and copy results back before the job exits — see
-   `ccdb-clusters/references/storage.md` for the recipe and the Fir `$SLURM_TMPDIR` fallback.
-   Scratch is purged (~60 days); keep durable data in `$PROJECT`.
-6. After the run, `seff <jobid>` and trim over-requested CPU / mem / time / GPU.
-
-### 4. Present and remind
-
-Show the complete script, explain non-obvious choices, and write it to the requested path
-(default `./job.sh`). Submit with `sbatch <script>.sh`; monitor with `sq` or `sacct -j <id>`;
-cancel with `scancel <id>`.
-
-### Optional (only if asked)
-
-Email (`--mail-type` / `--mail-user`), array jobs (`--array` + `$SLURM_ARRAY_TASK_ID`),
-dependency chains (`--dependency=afterok:<id>`), multi-node DDP (`--nodes`,
-`--ntasks-per-node`, `srun` / `torchrun`, `MASTER_PORT`), checkpoint signal-trapping.
+Check shell syntax after edits without executing the workload. Report the saved
+script, unresolved inputs, and material sizing choices. Include post-run `seff`
+guidance when resource tuning is relevant. Do not add arrays, email, distributed
+launch, or other features unless the workload or request needs them.

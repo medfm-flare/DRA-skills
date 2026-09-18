@@ -1,16 +1,12 @@
-# Fir Claude Notes
+# Fir Claude Code Adapter
 
-- Use `/slurm-status` to check real-time availability before submitting large jobs.
-- Fir is a shared Alliance cluster. Prefer `salloc`, `srun`, or `sbatch` for heavy work instead of the login node.
-- Fir has both full `h100` GPUs and H100 MIG profiles: `nvidia_h100_80gb_hbm3_1g.10gb`, `nvidia_h100_80gb_hbm3_2g.20gb`, and `nvidia_h100_80gb_hbm3_3g.40gb`.
-- For Fir job scripts, specify the GPU only with `--gpus-per-node=<gpu_type>:<count>`. Do not use `--partition`, `--gres`, or `--constraint`.
-- Before running the actual job, do a smoke test on the smallest feasible profile.
-- After a job finishes, run `seff <jobid>` and reduce future requests so jobs do not ask for materially more CPU, memory, time, or GPU than they use.
-- When working on a local machine, connect to Fir via the `fir.alliancecan.ca` host in `~/.ssh/config` using ControlMaster (the user completes password + Duo once in their own terminal; the socket is then reused). See the `connect` skill. Do not collect the Duo passcode in chat.
+Use `/slurm-status` for live Fir capacity, `/connect` to restore SSH access, and
+`/onboard` for first-time setup. Use `/slurm-job` to prepare scripts and
+`/submit-experiment` for authorized tracked submissions.
 
-Once connected:
+Resolve bundled helpers from `${CLAUDE_SKILL_DIR}`. If authentication requires
+an interactive terminal, the user can run `! ssh fir.alliancecan.ca` in Claude
+Code; the assistant then verifies and reuses the connection.
 
-```bash
-sinfo -p gpubase_bygpu_b1 -o "%12P %16G %5D %8T %10C %12m"   # representative GPU band
-squeue -u $(whoami)
-```
+Claude's node-context hook supplements the shared compute rules. The Fir GPU,
+storage, and submission constraints in the shared instructions still apply.

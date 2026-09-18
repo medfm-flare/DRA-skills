@@ -1,55 +1,29 @@
 ---
 name: slurm-storage
-description: Scan $HOME/$SCRATCH usage on an Alliance Canada cluster, find large files, and suggest what to move to $PROJECT or $SCRATCH to stay within quota. Use when the user asks about disk space, quota, or storage.
-allowed-tools: Bash(diskusage_report *), Bash(df *), Bash(du *), Bash(find *), Bash(ls *), Read, Glob, Grep
+description: "Inspect Alliance Canada storage usage and quotas and recommend cleanup or relocation. Use for cluster disk-space problems."
+allowed-tools: Read Glob Grep Bash(ssh *) Bash(diskusage_report *) Bash(df *) Bash(du *) Bash(find *) Bash(ls *)
 ---
 
-# Storage Scan (Alliance Canada)
+# Inspect Alliance Storage
 
-`$HOME` has a small fixed quota on every Alliance cluster (e.g. ~50 GB on Fir). This skill finds
-what is consuming space and recommends moving it to `$PROJECT` (durable, backed up) or `$SCRATCH`
-(large, purged after ~60 days of inactivity).
+Inspect quota and identify likely space consumers on the requested cluster/path.
+On a laptop, use the remote connection and cluster environment variables rather
+than scanning the laptop's home. This workflow reports recommendations; a scan
+request does not authorize moving or deleting data.
 
-## 1. Quota
+Start with `diskusage_report`. If unavailable, `df -h` on existing `$HOME`,
+`$SCRATCH`, and `$PROJECT` paths reports filesystem capacity, **not personal quota**.
+Keep that distinction visible. Use targeted `du` or file listings only when the
+quota report does not explain the problem. Avoid exhaustive shared-filesystem
+walks on login nodes; run sustained scans in an allocation.
 
-```bash
-diskusage_report 2>/dev/null || df -h "$HOME" "${SCRATCH:-}" "${PROJECT:-}" 2>/dev/null
-```
+Common consumers include model caches, environments, checkpoints, datasets, and
+job logs. Inspect relevant directories rather than scanning all of them by default.
+Use `ccdb-clusters` storage guidance for quota rules, cache redirection, or staging.
 
-Flag `$HOME` above 70% (warning) / 90% (critical).
-
-## 2. Largest directories in $HOME
-
-```bash
-du -h --max-depth=2 "$HOME" 2>/dev/null | sort -rh | head -30
-```
-
-## 3. Common offenders that belong on $PROJECT / $SCRATCH
-
-```bash
-du -sh ~/.conda ~/.cache/pip ~/.cache/huggingface ~/.cache/torch ~/wandb 2>/dev/null
-find "$HOME" -maxdepth 4 -type f \( -name "*.pt" -o -name "*.pth" -o -name "*.ckpt" \
-  -o -name "*.safetensors" -o -name "*.sif" -o -name "*.tar.gz" \) -size +100M \
-  -exec ls -lh {} \; 2>/dev/null | head -20
-```
-
-## 4. Report + recommendations
-
-Present a table of top consumers with a recommendation each. Use the user's real `$PROJECT` /
-`$SCRATCH` paths. Common advice:
-
-- **Conda / envs** → move to `$PROJECT` and symlink, or use a module / `uv` venv on `$SCRATCH`.
-- **Caches** → redirect via env vars in `~/.bashrc`:
-  ```bash
-  export HF_HOME=$PROJECT/.cache/huggingface
-  export TORCH_HOME=$PROJECT/.cache/torch
-  export PIP_CACHE_DIR=$SCRATCH/.cache/pip
-  export WANDB_DIR=$SCRATCH/wandb
-  ```
-- **Checkpoints / datasets** → `$PROJECT` (durable) or `$SCRATCH` (active jobs only; purged).
-
-**Quick wins**: `pip cache purge`, `conda clean --all`, stale `.out` / `.log` files, archives
-already extracted.
-
-**Never delete anything automatically** — only suggest commands and let the user decide. Warn
-about anything that may be in active use.
+Report the largest verified consumers, their paths/sizes, and recommended actions.
+Keep small configuration in `$HOME`, active-job I/O in purgeable `$SCRATCH`, and
+durable datasets/checkpoints in `$PROJECT`. Recreate non-relocatable environments
+instead of blindly moving them. Check active-job references before recommending
+cleanup. For a separate explicit cleanup request, establish exact paths and scope
+before mutation; do not treat all caches or old logs as disposable.

@@ -1,6 +1,6 @@
 # Skills for Digital Research Alliance
 
-This skill teaches Claude Code and/or Codex about our Slurm clusters, storage rules,
+This skill set teaches Claude Code and/or Codex about our Slurm clusters, storage rules,
 login-node safety, experiment conventions, and reusable HPC workflows.
 
 ![DRA Skills overview: use Claude Code or Codex to connect to a cluster, choose resources, launch tracked experiments, troubleshoot jobs, collect results, and reduce resource waste.](assets/skills-overview.png)
@@ -60,7 +60,7 @@ Shared workflows include:
 - `onboard` - interactive setup helper.
 - `slurm-status` - check GPU/resource availability.
 - `slurm-job` - create or modify sbatch scripts.
-- `slurm-seff-report` - retrofit a job script to emit an inline cgroup CPU/memory snapshot; final `seff` after job exit remains authoritative.
+- `slurm-seff-report` - add reporting matched to the job shape; use post-completion `seff` for final accounting.
 - `slurm-debug` - diagnose failed, killed, or pending jobs.
 - `submit-experiment` - submit documented Slurm experiments.
 - `harvest` - collect completed experiment results.
@@ -101,8 +101,8 @@ shared/instructions/claude.md    # Claude-specific commands, hooks, agents
 shared/instructions/codex.md     # Codex-specific AGENTS.md and skill guidance
 
 modules/<cluster>/instructions/core.md
-modules/<cluster>/instructions/claude.md
-modules/<cluster>/instructions/codex.md
+modules/<cluster>/instructions/claude.md  # optional tool-specific differences
+modules/<cluster>/instructions/codex.md   # optional tool-specific differences
 
 shared/skills/                   # Shared skills
 shared/codex/skills/             # Codex-only skill adapters
@@ -119,34 +119,50 @@ Why this shape:
 
 ## Skill Authoring
 
-Skills in this repo follow the Agent Skills conventions below. Apply them when adding or editing a
-skill (most map directly to the issues this bundle was hardened against):
+Claude Code and Codex are both supported. Shared skills contain tool-neutral HPC
+guidance; each tool retains its own adapters and installation path, including
+Claude's agents, settings, and hooks. The shared clarity and selective-loading
+improvements draw on OpenAI's [GPT-6 Astra skills and prompts guidance](https://developers.openai.com/blog/rethinking-skills-and-prompts-for-gpt-6-astra)
+without requiring a particular model or replacing Claude's interface.
 
-- **Progressive disclosure.** Keep `SKILL.md` lean — only the key path. The `name` + `description`
-  (~100 words) is always in context; the body loads when the skill triggers; put heavy reference
-  material (tables, long examples) in `references/` and executable logic in `scripts/`. Reference
-  bundled scripts via `${CLAUDE_SKILL_DIR}/scripts/...`, never relative paths.
-- **`description` = what + when.** Third person, stating both what the skill does and the trigger
-  conditions/keywords a user would say. Claude tends to *under*-trigger — be explicit about when
-  to use it.
-- **Single responsibility.** One skill, one job; keep the body well under 500 lines (split if it
-  grows). Prefer several small skills over one giant one.
-- **`allowed-tools` matches the body.** Grant exactly the commands the skill runs, in space-pattern
-  syntax (`Bash(sbatch *)`, not `Bash(sbatch:*)`); no over-broad grants.
-- **Single source of truth, not prose.** State-tracking workflows (e.g. `submit-experiment`,
-  `harvest`) keep a structured file (`metadata.yaml`) as the SSOT and derive human-readable views
-  from it — never parse markdown for state.
-- **Fail loud.** Helper scripts exit non-zero with a clear message on real errors; never emit
-  empty/partial output that silently breaks a downstream command.
-- **Test before shipping.** Validate a new or changed skill in a fresh session (ideally via a
-  subagent) against a couple of realistic prompts before relying on it.
+- **Describe the routing boundary.** Keep each description short: what it does and
+  when it applies. Avoid broad keyword triggers, mandatory wording, and duplicated
+  capability catalogs in always-loaded instructions.
+- **Load detail when needed.** Put shared constraints and outcome criteria in
+  `SKILL.md`; link platform recipes, schemas, and substantial examples from the
+  relevant decision point. Simple skills can stay self-contained.
+- **Preserve operational requirements.** Login-node discipline, Fir GPU syntax,
+  authentication boundaries, and reproducible run records remain explicit. Treat
+  old measurements and example resource sizes as evidence to assess, not universal gates.
+- **Honor task scope.** Complete authorized preparation and file updates without
+  repeated approval. Check authorization at job launch, cancellation, data mutation,
+  or publication. A preview remains read-only; uncertain submissions must be
+  reconciled before retrying.
+- **Keep shared truth in one place.** `metadata.yaml` owns run status; the canonical
+  schema lives with `submit-experiment`. Tool adapters should express real tool
+  differences, not repeat cluster policy.
+- **Use portable paths.** Resolve references from the loaded skill directory and
+  use absolute helper paths. `${CLAUDE_SKILL_DIR}` is available in Claude; Codex
+  should resolve the skill's installed location instead of assuming that variable.
+- **Validate the changed behavior.** Check frontmatter, packaged references, and
+  installation with `python3 evals/validate_bundle.py` (requires PyYAML and the
+  installer's `jq`). These tests use disposable fixture directories, no SSH or
+  Slurm jobs, and do not modify the user's assistant configuration. Use
+  `evals/routing-trigger.json` separately in a fresh model session to evaluate
+  routing and decision boundaries; structural checks do not prove model behavior.
+
+### Authorization compatibility
+
+`harvest` now treats a request to update experiment records as authorization for
+those updates; `--auto` remains supported. A preview request still writes nothing.
+`submit-experiment` prepares a concrete run before any missing launch approval and
+does not ask again for a run whose resource bounds are already authorized. Its
+schema distinguishes prepared, rejected, and uncertain submissions from accepted jobs.
 
 ### References
 
-- **Anthropic (official):** [Agent Skills docs](https://docs.anthropic.com/en/docs/claude-code/skills)
-  · [`anthropics/skills`](https://github.com/anthropics/skills) (incl. `skill-creator`)
-- **Community:** [`mattpocock/skills`](https://github.com/mattpocock/skills) (`write-a-skill`)
-  · [`obra/superpowers`](https://github.com/obra/superpowers) (`writing-skills`)
+- [OpenAI: Rethinking skills and prompts for GPT-6 Astra](https://developers.openai.com/blog/rethinking-skills-and-prompts-for-gpt-6-astra)
+- [Anthropic: Agent Skills](https://docs.anthropic.com/en/docs/claude-code/skills)
 
 ## Contributing
 

@@ -18,19 +18,12 @@ Alliance-specific context.
 | [Niagara](niagara.md) | UToronto/SciNet | None (Mist is the GPU partition) | Large CPU-parallel (≥40 cores) | Operational | Whole-node scheduling, opt-in |
 | [Killarney](killarney.md) | UToronto (Vector + SciNet) | L40s 48GB (168 std nodes), H100 80GB (10 perf nodes) | AI workloads | TBA in mirror — verify | PAICE / Pan-Canadian AI Compute |
 
-## Cluster choice rule of thumb
+## Choosing a cluster
 
-```
-Job duration < 1 day   → Trillium
-Job duration ≥ 1 day   → Fir or Rorqual (whichever has higher LevelFS)
-AI / multi-GPU LLMs    → Killarney (L40s for inference, H100 perf nodes for training)
-Large CPU-parallel     → Niagara
-General-purpose ML     → Cedar / Graham / Béluga / Narval (legacy, but plenty of capacity)
-```
-
-If your group's allocation doesn't include a target cluster, either request
-allocation via the next RAC, or fall back to a cluster you do have access to.
-Most groups have at least Cedar / Graham via `def-<pi>_*`.
+Use the user's selected cluster when specified. If choosing a target is part of
+the request, compare eligible allocations, required hardware/software, data
+location, current service status, and job limits. The dated table above is a
+starting point, not an instruction to move an experiment or a current status feed.
 
 ## How these pages are sourced
 

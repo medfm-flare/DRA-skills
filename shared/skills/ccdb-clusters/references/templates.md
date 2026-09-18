@@ -30,8 +30,9 @@ module load python/3.11.5                      # or the version you need
 source <scratch>/<project>/.venv/bin/activate
 ```
 
-Replace `<scratch>` with `$SCRATCH` (or the literal path) and `<project>` with
-your project dir.
+Replace `<scratch>` with the resolved literal scratch path and `<project>` with
+your project dir. Slurm does not expand shell variables in `#SBATCH` directives.
+Create stdout/stderr parent directories before submission, not inside the job.
 
 ## Single-GPU MIG (Fir-style — H100 with MIG slices)
 
