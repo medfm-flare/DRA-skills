@@ -1,7 +1,7 @@
 # Skills for Digital Research Alliance
 
-This skill set teaches Claude Code and/or Codex about our Slurm clusters, storage rules,
-login-node safety, experiment conventions, and reusable HPC workflows.
+This skill set teaches Claude Code and/or Codex about Slurm commands, storage rules,
+login-node safety, experiment conventions, and reusable HPC workflows on [Digital Research Alliance](https://docs.alliancecan.ca/wiki/Technical_documentation).
 
 ![DRA Skills overview: use Claude Code or Codex to connect to a cluster, choose resources, launch tracked experiments, troubleshoot jobs, collect results, and reduce resource waste.](assets/skills-overview.png)
 
